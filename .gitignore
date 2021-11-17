@@ -1,0 +1,11 @@
+# Don't track pycharm stuff
+.idea/
+
+# Don't track .DS_Store (Mac Temp file)
+.DS_Store
+
+# Don't track __pycache__ folders
+*__pycache__
+
+# Don't track virtual environment subdirectories
+virtualenv/
