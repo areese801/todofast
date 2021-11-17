@@ -9,3 +9,7 @@
 
 # Don't track virtual environment subdirectories
 virtualenv/
+
+# Don't track config.json (There is a config.json.template file)
+config.json
+
