@@ -1,0 +1,11 @@
+{
+    "documentation":
+    {
+        "line1": "This is a template file that is intended to show you how to format your own actual configuration file", 
+        "line2": "Name your own config file as this file is named WITHOUT the .template extension."
+    },
+    "config":
+    {
+        "apiTokenFile": "/a/path/to/a/file/outside of version control/that/contains/your/api/key"
+    }
+}
