@@ -6,6 +6,6 @@
     },
     "config":
     {
-        "bitwardenApiTokenGuid": "The GUID that points to the API token in the bitwarden vault.  See:  https://pypi.org/project/cred-manage/"
+        "todoistApiTokenGuid": "The GUID that points to the API token in the Todoist API.  See:  https://pypi.org/project/cred-manage/"
     }
 }

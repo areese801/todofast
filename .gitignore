@@ -1,5 +1,9 @@
-# Don't track pycharm stuff
+# Don't track pycharm or VSCode stuff
 .idea/
+.vscode/
+
+# Don't track code coverage stuff
+.coverage
 
 # Don't track .DS_Store (Mac Temp file)
 .DS_Store
@@ -10,6 +14,10 @@
 # Don't track virtual environment subdirectories
 virtualenv/
 
-# Don't track config.json (There is a config.json.template file)
+# Don't track config.json (There is a 'config.json.template' file that we DO want to track)
 config.json
 
+# Don't track packaging stuff
+dist/
+build/
+*.egg-info/
