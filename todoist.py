@@ -10,7 +10,8 @@ import sys
 import uuid
 
 from requests import status_codes
-from requests.api import head
+from requests.api import get, head
+from requests.models import HTTPError
 
 # List of dicts below correspond with colors supported by todoist.  See:  https://developer.todoist.com/guides/#colors
 TODOIST_COLORS = {
@@ -131,6 +132,19 @@ class TodoistAPI():
 
         return result
 
+    def _do_delete(self, url:str, headers:dict={}, expected_status_code=204):
+        """
+        Deletes a resource.  That's it
+
+        Args:
+            url (str): The endpoint to do the delete on
+            headers ([type], optional): [description]. Defaults to dict={}.
+            expected_status_code (int, optional): [description]. Defaults to 204.
+        """
+
+        result = self._do_request(http_method='DELETE', url=url, expected_status_code=expected_status_code)
+        return result
+
     def _do_request(self, http_method:str, url:str, headers:dict={}, post_request_data:dict={}, get_request_url_parameters:dict={}, expected_status_code=200):
         """
         Does a request to the API with the corresponding 'verb' passed in the request_type argument
@@ -151,7 +165,7 @@ class TodoistAPI():
 
         # Validate the method type
         http_method = http_method.upper()
-        supported_http_methods = ['GET', 'POST']
+        supported_http_methods = ['GET', 'POST', 'DELETE']
         if http_method.upper() not in supported_http_methods:
             raise ValueError(f"{http_method} is not supported by this method.  Supported request types are: {supported_http_methods}")  
 
@@ -180,6 +194,8 @@ class TodoistAPI():
             result = requests.get(url=url, headers=headers, params=get_request_url_parameters)
         elif http_method == 'POST':
             result = requests.post(url=url, headers=headers, data=json.dumps(post_request_data))
+        elif http_method == 'DELETE':
+            result = requests.delete(url=url, headers=headers)
         else:
             raise NotImplementedError(f"No handling is implemented for the HTTP method {http_method}")
 
@@ -283,7 +299,170 @@ class TodoistAPI():
         result = self._do_post(url=endpoint_url, data=data, expected_status_code=200)
 
         return result.json()
+
+    def get_project(self, project_id:int):
+        """
+        Gets a project from the API by ID
+
+        Args:
+            project_id (int): The ID of the project we want to get
+        """
+
+        # Validate the project ID
+        if not type(project_id) is int:
+            raise TypeError(f"The project_id must be an integer.  Got {type(project_id)}")
+
+        method='projects'
+        endpoint_url = f"{self.base_url}{method}/{project_id}"
+        result = self._do_get(url=endpoint_url)
+        return result.json()
+
+    def project_exists(self, project_id:int) -> bool:
+        """
+        Checks if a project exists or not
+
+        Args:
+            project_id (int): The id of the project we care to test
+
+
+        Returns:
+            bool: Boolean Flag that indicates if the project exists or not
+        """
+
+        # Validate the project ID
+        if not type(project_id) is int:
+            raise TypeError(f"The project_id must be an integer.  Got {type(project_id)}")
+
+        # Get the project
+        try:
+            project = self.get_project(project_id=project_id)
+        except Exception as ex:
+            response = getattr(ex, 'response', None)
+            if response is None:
+                raise ex
+            
+            status_code = getattr(response, 'status_code', None)
+            if status_code is None:
+                raise ex
+
+            if status_code == 404:
+                return False # The project doesn't exist, and looking for it resulted in a 404 error
+            else:
+                # We got some unexpected status code.  Let's raise the exception
+                raise ex
         
+        return True
+
+    def update_project(self, project_id:int, project_name:str=None, color=None, is_favorite=None):
+        """
+        Updates the properties of a project
+
+        Args:
+            project_id (int): The ID of the project we wish to update
+            project_name (str, optional): A new name for the project
+            color ([type], optional): A new color id, name, or hex code for the project
+            is_favorite ([type], optional): A boolean flag that indicates if the project is a favorite or not
+        """
+
+        # Validate the project ID
+        if not type(project_id) is int:
+            raise TypeError(f"The project_id must be an integer.  Got {type(project_id)}")
+
+        # Validate that something to update was actually passed into the method
+        if project_name is None and color is None and is_favorite is None:
+            raise ValueError(f"There was no new property value to update on the project.  At least one new value needs to be passed")
+
+        # Validate that the project already exists
+        project_exists = self.project_exists(project_id=project_id)
+        if project_exists is False:
+            raise ValueError(f"The project id {project_id} does not exist.  Cannot update.")
+        else:
+            project = self.get_project(project_id=project_id)
+
+        # Validate the color  #TODO:  Refactor this.  This block is duplicated in another function.  Collapse them both
+        if not color is None:
+            color_found = False
+            for c in TODOIST_COLORS.keys():
+                o = TODOIST_COLORS[c]
+                color_id = c
+                color_hex_code = o.get('color_hex_code')
+                color_name = o.get('color_name')
+
+                if color == color_id or color.lower() == color_hex_code or color.lower() == color_name:
+                    color_found = True
+                    color = color_id  # We're interested in the ID, despite what the user passed into the function
+                    break
+
+            if color_found is False:
+                raise ValueError(f"Could not resolve color value of {color} by id, nor by hex code, nor by name.  Got [{color}].  Possible values are: {json.dumps(TODOIST_COLORS, indent=4)}")
+
+        # Validate that at least one of the attributes to update is different
+        current_project_name = project['name']
+        current_color = project['color']
+        current_is_favorite = project['favorite']
+
+        if project_name is not None:
+            project_name_matches = True if current_project_name == project_name else False
+        else:
+            project_name_matches = True
+        
+        if color is not None:
+            color_matches = True if current_color == color else False
+        else:
+            color_matches = True
+
+        if is_favorite is not None:
+            is_favorite_matches = True if current_is_favorite == is_favorite else False
+        else:
+            is_favorite_matches = True
+
+        if all([project_name_matches, color_matches, is_favorite_matches]):
+            raise ValueError(f"")
+
+        # Validations have passed.  Let's do the update
+        data = {}
+        if project_name is not None:
+            data['name'] = project_name
+
+        if color is not None:
+            data['color'] = color
+
+        if is_favorite is not None:
+            data['favorite'] = is_favorite
+
+        method='projects'
+        endpoint_url = f"{self.base_url}{method}/{project_id}"
+        
+        result = self._do_post(url=endpoint_url, data=data, expected_status_code=204)
+        
+        return result
+
+    def delete_project(self, project_id:int):
+        """
+        Deletes a project
+
+        Args:
+            project_id (int): The project ID we wish to delete
+        """
+
+        if not self.project_exists(project_id=project_id):
+            raise ValueError(f"The project id {project_id} does not exist.  There is nothing to delete")
+        
+        method='projects'
+        endpoint_url = f"{self.base_url}{method}/{project_id}"
+        result = self._do_delete(url=endpoint_url)
+        return result
+
+    def get_app_project_collaborators(self, project_id:int):
+        """
+        Placeholder for the API method to get all collaborators which i don't really care about right now
+
+        Args:
+            project_id (int): [description]
+        """
+
+        raise NotImplementedError(f"This method is not implemented.  But YOU could implement it!!")
+
 
     def get_active_tasks(self, project_id:int=None, section_id:int=None, label_id:int=None, filter:str=None, lang:str=None, ids:list=None):
         """
@@ -389,6 +568,7 @@ class TodoistAPI():
 
         return task
 
+    
 
 if __name__ == '__main__':
     td = make_todoist_api()
@@ -396,5 +576,10 @@ if __name__ == '__main__':
     # projects=td.get_all_projects()
     # print(json.dumps(projects, indent=4))
     # print(json.dumps(td.get_task_by_id(task_id=5374849640999), indent=4))
-    # new_project = td.create_new_project(new_project_name="Test_Project_For_New_Creation4", color="taupe", is_favorite=True)
+    new_project = td.create_new_project(new_project_name="Test_Project_For_New_Creation5", color="taupe", is_favorite=True)
+    p_id = new_project['id']
+    td.update_project(project_id=p_id, color='b8256f')
+    td.delete_project(project_id=p_id)
+
+    
     
