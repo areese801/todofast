@@ -8,6 +8,7 @@ import requests
 import os
 import sys
 import uuid
+import collections
 
 from requests import status_codes
 from requests.api import get, head
@@ -453,7 +454,7 @@ class TodoistAPI():
         result = self._do_delete(url=endpoint_url)
         return result
 
-    def get_app_project_collaborators(self, project_id:int):
+    def get_all_project_collaborators(self, project_id:int):
         """
         Placeholder for the API method to get all collaborators which i don't really care about right now
 
@@ -462,6 +463,96 @@ class TodoistAPI():
         """
 
         raise NotImplementedError(f"This method is not implemented.  But YOU could implement it!!")
+
+    def get_all_sections(self, project_id:int=None) -> list:
+        """
+        Gets all sections of all projects, or if project_id is specified, gets only the sections of that project
+        Args:
+            project_id: A project ID for which to get the sections.  If not passed, all sections for all projects are returned
+
+        Returns: a list with all sections
+        """
+
+        method='sections'
+        endpoint_url = f"{self.base_url}{method}"
+
+        # Validate project_id
+        params = {}
+        if project_id is not None:
+            if type(project_id) is not int:
+                raise TypeError(f"The project_id, if supplied must be an integer.  Got {type(project_id)}")
+
+            all_projects = self.get_all_projects()
+            if project_id not in [p['id'] for p in all_projects]:
+                raise ValueError(f"Cannot get sections for project id {project_id} because it does not exist!")
+
+            params['project_id'] = project_id
+
+        result = self._do_get(url=endpoint_url, params=params)
+        return result.json()
+
+    def get_sections_by_project_id(self, project_id:int) -> list:
+        """
+        A simple wrapper around get_all_sections, enforcing the project_id argument as required
+        Args:
+            project_id: The project ID for the section
+
+        Returns: a list with all the sections for the given project
+
+        """
+
+        return self.get_all_sections(project_id=project_id) # all validations handled within get_all_sections()
+
+    def create_new_section(self, section_name:str, project_id:int, order:int = None) -> dict:
+        """
+        Creates a new section within a project as specified by the project ID
+        Args:
+            section_name: The name for the new section
+            project_id: The ID for the project which should contain this section
+            order: The order among other sections
+
+        Returns: A dictionary containing the new section object
+
+        """
+
+        #Validate the section_name:
+        if not section_name or type(section_name) is not str:
+            raise ValueError(f"The section name must be a non-empty string.  Got {section_name}")
+
+        # Validate the project ID
+        if not self.project_exists(project_id=project_id):
+            raise ValueError(f"There is no project wit the ID {project_id}.  It does not exist")
+
+        # Create the new section
+        method="sections"
+        endpoint_url = f"{self.base_url}{method}"
+        data=dict(project_id=project_id,name=section_name)
+
+        result = self._do_post(url=endpoint_url, data=data)
+
+        return result.json()
+
+
+    def get_single_section(self):
+        #TODO:  Implement this.  See:  https://developer.todoist.com/rest/v1/?shell#get-a-single-section
+        raise NotImplementedError
+
+    def update_section(self):
+        #TODO:  Implement this.  See:  https://developer.todoist.com/rest/v1/?shell#update-a-section
+        raise NotImplementedError
+
+    def delete_section(self):
+        #TODO:  Implement this.  See:  https://developer.todoist.com/rest/v1/?shell#delete-a-section
+        raise NotImplementedError
+
+    
+
+
+
+
+
+
+
 
 
     def get_active_tasks(self, project_id:int=None, section_id:int=None, label_id:int=None, filter:str=None, lang:str=None, ids:list=None):
@@ -568,18 +659,200 @@ class TodoistAPI():
 
         return task
 
+    def create_new_task(self, task_name:str, description:str = None, project_id:int = None, section_id:int = None,
+                        parent_id:int = None, order:int = None, label_ids:list = None, priority:int = 1,
+                        due_string:str = None, due_date:str = None, due_datetime:str = None, due_lang:str = "EN",
+                        assignee:int = None):
+
+        """
+
+        Args:
+            task_name:  String.  The Name of the task
+            description: Optional.  The additional descriptive text for the task
+            project_id:  The ID for the project the task should go in, if not the inbox (default)
+            section_id: The ID for the section within the project the task should go in, if any
+            parent_id: The parent task ID beneath which the task should be a subtask
+            order: Non-zero integer value used by clients to sort tasks under the same parent.
+            label_ids: 	IDs of labels associated with the task.
+            priority: 	Task priority from 1 (normal) to 4 (urgent).
+            due_string: 	Human defined task due date (ex.: "next Monday", "Tomorrow").
+                Value is set using local (not UTC) time.
+            due_date: Specific date in YYYY-MM-DD format relative to user’s timezone.
+            due_datetime: 	Specific date and time in RFC3339 format in UTC.
+            due_lang: 2-letter code specifying language in case due_string is not written in English.
+            assignee:
+
+        Returns:
+
+        """
+
+        # Handle task name
+        if not task_name or type(task_name) is not str:
+            raise ValueError(f"The task name must be a non empty string.")
+
+        # Handle task description (additional descriptive text)
+        if description is not None:
+            description = str(description)
+
+        # Validate Project ID, if one was specified
+        if project_id is not None:
+            if not self.project_exists(project_id=project_id):
+                raise ValueError(f"There is no project with the ID, {project_id}.  It doesn't exist.")
+
+        # Validate Section ID, if one was specified
+        if section_id is not None:
+            # We must have a project to specify a section within, if section is specified
+            if project_id is None:
+                raise ValueError(f"You cannot specify a section ID without also specifying the project ID")
+
+            project_sections = self.get_sections_by_project_id(project_id=project_id)
+            if section_id not in [p['id'] for p in project_sections]:
+                raise ValueError(f"There is no section with the ID {section_id} beneath the project with the ID {project_id}")
+
+        # Validate the parent ID (the ID of the parent task).
+        # As of 2022-02-05, the official UI would allow me to build a child task into a parent and specify a different
+        # Container project, however the parent-child relationship seems to be ignored
+        if parent_id is not None:
+            parent_task_project_id = None
+            err_msg = f"The parent ID, if specified should be an integer pointing to another task within the same project."
+
+            # Validate data type
+            if type(parent_id) is not int:
+                raise ValueError(err_msg)
+
+            # Isolate the parent task object
+            all_tasks = self.get_active_tasks(project_id=project_id)
+            if parent_id not in [t['id'] for t in all_tasks]:
+                if project_id is not None:
+                    raise ValueError(f"The specified parent task ID {parent_id} does not exist under the project with ID {project_id}")
+                else:
+                    raise ValueError(f"The specified parent task ID {parent_id} does not exist.")
+            else:
+                parent_task = None
+                for t in all_tasks:
+                    if t['id'] == parent_id:
+                        parent_task = t
+                        break
+
+            if parent_task is None:
+                raise KeyError(f"Could not isolate the parent task when verifying project ID") # Might exist in a diff project though
+
+            parent_task_project_id = parent_task['project_id']
+
+            # Validate that the parent task has the same parent project as the current task
+            if project_id is None:
+                project_id = parent_task_project_id
+            else:
+                if project_id != parent_task_project_id:
+                    raise ValueError(f"The project_id, if specified along with parent_id (for parent task), must match that of the parent task.")
+
+            # Validate order
+            if order is not None:
+                if type(order) is not int or order <=0:
+                    raise ValueError(f"The order argument, if specified should be a non-zero positive integer")
+
+            # Validate labels:
+                #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method
+
+            # Validate priority:
+            if priority is not None:
+                permissible_priorities = [1, 2, 3, 4]
+                if priority not in permissible_priorities:  # 1 = Normal Priority .. 4 = Urgent Priority
+                    raise ValueError(f"Priority, if specified, must be one of: {permissible_priorities}")
+
+            # Validate due_* arguments.  These must only 1 of these specified, at most
+            due_values = [due_string, due_date, due_datetime]
+            if any(due_values):
+                i = 0
+                for dv in due_values:
+                    if dv is not None:
+                        if type(dv) is not str:
+                            raise ValueError(f"All due_* arguments, if passed should be string.  Only one should be passed at a time")
+                        i +=1
+                if i >1:
+                    raise ValueError(f"Only one of 'due_string', 'due_date', 'due_datetime' may be passed at once.  Got {i}.")
+
+            # Default the due string to tomorrow, if not otherwise specified
+            if not due_date and not due_datetime:
+                if due_string is None:
+                    due_string = "Tomorrow"
+
+            # Validate language
+            #TODO:  Implement this
+            if due_lang != "EN":
+                raise NotImplementedError(f"There is no validation handling for due language.  Please have it built")
+
+            # Validate Assignee
+            if assignee:
+                if type(assignee) is not int:
+                    raise ValueError(f"Assignee argument, if specified should be a positive integer")
+                else:
+                    raise NotImplementedError(f"There is no validation handling for assignee.  Please have it built")
+                    #TODO:  Implement this at some point
+
+
+
+            #TODOD.  Create Post Payload here
+
+
+
+
+
+
+
+
+
+
+        print("!")
+
+
+
+
+
+
+
+
+
+
     
 
 if __name__ == '__main__':
+
+    # Instantiate object
     td = make_todoist_api()
     # active_tasks = td.get_active_tasks()
-    # projects=td.get_all_projects()
+
+    #  Get all the projects
+    projects=td.get_all_projects()
+
+    # Create temp project
+    new_project = td.create_new_project(new_project_name="Development Project", color="taupe", is_favorite=True)
+    test_project_id = new_project['id']
+
+    # Create a temp section within the temp project
+    new_section = td.create_new_section(section_name='Development Test Section', project_id=test_project_id)
+
+    # Get all the sections for a given project
+    # project_sections = td.get_all_sections(project_id=2283847451)
+
+    # Get all of the project sections for all of the projects
+    # all_project_sections = td.get_all_sections()
+
+
     # print(json.dumps(projects, indent=4))
     # print(json.dumps(td.get_task_by_id(task_id=5374849640999), indent=4))
-    new_project = td.create_new_project(new_project_name="Test_Project_For_New_Creation5", color="taupe", is_favorite=True)
-    p_id = new_project['id']
-    td.update_project(project_id=p_id, color='b8256f')
-    td.delete_project(project_id=p_id)
+    # p_id = new_project['id']
+    # td.update_project(project_id=p_id, color='b8256f')
+    # td.delete_project(project_id=p_id)
 
+    # Create a new test task
+    td.create_new_task(task_name='test task', project_id=test_project_id, section_id=2)
+
+    # Clean up the temp project
+    td.delete_project(project_id=test_project_id)
+
+
+
+    print("Done")
     
     
