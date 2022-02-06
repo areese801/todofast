@@ -746,72 +746,69 @@ class TodoistAPI():
                 if project_id != parent_task_project_id:
                     raise ValueError(f"The project_id, if specified along with parent_id (for parent task), must match that of the parent task.")
 
-            # Validate order
-            if order is not None:
-                if type(order) is not int or order <=0:
-                    raise ValueError(f"The order argument, if specified should be a non-zero positive integer")
+        # Validate order
+        if order is not None:
+            if type(order) is not int or order <=0:
+                raise ValueError(f"The order argument, if specified should be a non-zero positive integer")
 
-            # Validate labels:
-                #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method
+        # Validate labels:
+            #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method
 
-            # Validate priority:
-            if priority is not None:
-                permissible_priorities = [1, 2, 3, 4]
-                if priority not in permissible_priorities:  # 1 = Normal Priority .. 4 = Urgent Priority
-                    raise ValueError(f"Priority, if specified, must be one of: {permissible_priorities}")
+        # Validate priority:
+        if priority is not None:
+            permissible_priorities = [1, 2, 3, 4]
+            if priority not in permissible_priorities:  # 1 = Normal Priority .. 4 = Urgent Priority
+                raise ValueError(f"Priority, if specified, must be one of: {permissible_priorities}")
 
-            # Validate due_* arguments.  These must only 1 of these specified, at most
-            due_values = [due_string, due_date, due_datetime]
-            if any(due_values):
-                i = 0
-                for dv in due_values:
-                    if dv is not None:
-                        if type(dv) is not str:
-                            raise ValueError(f"All due_* arguments, if passed should be string.  Only one should be passed at a time")
-                        i +=1
-                if i >1:
-                    raise ValueError(f"Only one of 'due_string', 'due_date', 'due_datetime' may be passed at once.  Got {i}.")
+        # Validate due_* arguments.  These must only 1 of these specified, at most
+        due_values = [due_string, due_date, due_datetime]
+        if any(due_values):
+            i = 0
+            for dv in due_values:
+                if dv is not None:
+                    if type(dv) is not str:
+                        raise ValueError(f"All due_* arguments, if passed should be string.  Only one should be passed at a time")
+                    i +=1
+            if i >1:
+                raise ValueError(f"Only one of 'due_string', 'due_date', 'due_datetime' may be passed at once.  Got {i}.")
 
-            # Default the due string to tomorrow, if not otherwise specified
-            if not due_date and not due_datetime:
-                if due_string is None:
-                    due_string = "Tomorrow"
+        # Default the due string to tomorrow, if not otherwise specified
+        if not due_date and not due_datetime:
+            if due_string is None:
+                due_string = "Tomorrow"
 
-            # Validate language
-            #TODO:  Implement this
-            if due_lang != "EN":
-                raise NotImplementedError(f"There is no validation handling for due language.  Please have it built")
+        # Validate language
+        #TODO:  Implement this
+        if due_lang != "EN":
+            raise NotImplementedError(f"There is no validation handling for due language.  Please have it built")
 
-            # Validate Assignee
-            if assignee:
-                if type(assignee) is not int:
-                    raise ValueError(f"Assignee argument, if specified should be a positive integer")
-                else:
-                    raise NotImplementedError(f"There is no validation handling for assignee.  Please have it built")
-                    #TODO:  Implement this at some point
-
-
-
-            #TODOD.  Create Post Payload here
+        # Validate Assignee
+        if assignee:
+            if type(assignee) is not int:
+                raise ValueError(f"Assignee argument, if specified should be a positive integer")
+            else:
+                raise NotImplementedError(f"There is no validation handling for assignee.  Please have it built")
+                #TODO:  Implement this at some point
 
 
+        # Create payload
+        payload = dict(content=task_name, description=description, project_id=project_id, section_id=section_id
+                       , parent_id=parent_id, order=order, label_ids=label_ids, priority=priority
+                       , due_lang=due_lang, assignee=assignee)
 
+        # Append the due_* variable into the payload.  There should only be one of the three.  Or None
+        if due_string is not None:
+            payload['due_string'] = due_string
+        elif due_date is not None:
+            payload['due_date'] = due_date
+        elif due_datetime is not None:
+            payload['due_datetime'] = due_datetime
 
-
-
-
-
-
-
-        print("!")
-
-
-
-
-
-
-
-
+        # Do the post
+        method = "tasks"
+        endpoint_url = f"{self.base_url}{method}"
+        result = self._do_post(url=endpoint_url, data=payload)
+        return result.json()
 
 
     
@@ -846,7 +843,7 @@ if __name__ == '__main__':
     # td.delete_project(project_id=p_id)
 
     # Create a new test task
-    td.create_new_task(task_name='test task', project_id=test_project_id, section_id=2)
+    td.create_new_task(task_name='test task', project_id=test_project_id)
 
     # Clean up the temp project
     td.delete_project(project_id=test_project_id)
