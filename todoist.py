@@ -2,6 +2,10 @@
 A Wrapper for the Todoist API
 """
 
+#TODO:  Implement logging module throughout this program?
+#TODO:  Compare the create_new_task and update_task methods.  They use a lot of the same validations.  Chance to refactor!
+import string
+
 from cred_manage.bitwarden import make_bitwarden_container
 import json
 import requests 
@@ -10,32 +14,33 @@ import sys
 import uuid
 import collections
 
+
 from requests import status_codes
 from requests.api import get, head
 from requests.models import HTTPError
 
 # List of dicts below correspond with colors supported by todoist.  See:  https://developer.todoist.com/guides/#colors
 TODOIST_COLORS = {
-30: {"color_hex_code": "b8256f", "color_name": "berry_red"}, 
-40: {"color_hex_code": "96c3eb", "color_name": "light_blue"}, 
-31: {"color_hex_code": "db4035", "color_name": "red"}, 
-41: {"color_hex_code": "4073ff", "color_name": "blue"}, 
-32: {"color_hex_code": "ff9933", "color_name": "orange"}, 
-42: {"color_hex_code": "884dff", "color_name": "grape"}, 
-33: {"color_hex_code": "fad000", "color_name": "yellow"}, 
-43: {"color_hex_code": "af38eb", "color_name": "violet"}, 
-34: {"color_hex_code": "afb83b", "color_name": "olive_green"}, 
-44: {"color_hex_code": "eb96eb", "color_name": "lavender"}, 
-35: {"color_hex_code": "7ecc49", "color_name": "lime_green"}, 
-45: {"color_hex_code": "e05194", "color_name": "magenta"}, 
-36: {"color_hex_code": "299438", "color_name": "green"}, 
-46: {"color_hex_code": "ff8d85", "color_name": "salmon"}, 
-37: {"color_hex_code": "6accbc", "color_name": "mint_green"}, 
-47: {"color_hex_code": "808080", "color_name": "charcoal"}, 
-38: {"color_hex_code": "158fad", "color_name": "teal"}, 
-48: {"color_hex_code": "b8b8b8", "color_name": "grey"}, 
-39: {"color_hex_code": "14aaf5", "color_name": "sky_blue"}, 
-49: {"color_hex_code": "ccac93", "color_name": "taupe"}
+    30: {"color_hex_code": "b8256f", "color_name": "berry_red"},
+    40: {"color_hex_code": "96c3eb", "color_name": "light_blue"},
+    31: {"color_hex_code": "db4035", "color_name": "red"},
+    41: {"color_hex_code": "4073ff", "color_name": "blue"},
+    32: {"color_hex_code": "ff9933", "color_name": "orange"},
+    42: {"color_hex_code": "884dff", "color_name": "grape"},
+    33: {"color_hex_code": "fad000", "color_name": "yellow"},
+    43: {"color_hex_code": "af38eb", "color_name": "violet"},
+    34: {"color_hex_code": "afb83b", "color_name": "olive_green"},
+    44: {"color_hex_code": "eb96eb", "color_name": "lavender"},
+    35: {"color_hex_code": "7ecc49", "color_name": "lime_green"},
+    45: {"color_hex_code": "e05194", "color_name": "magenta"},
+    36: {"color_hex_code": "299438", "color_name": "green"},
+    46: {"color_hex_code": "ff8d85", "color_name": "salmon"},
+    37: {"color_hex_code": "6accbc", "color_name": "mint_green"},
+    47: {"color_hex_code": "808080", "color_name": "charcoal"},
+    38: {"color_hex_code": "158fad", "color_name": "teal"},
+    48: {"color_hex_code": "b8b8b8", "color_name": "grey"},
+    39: {"color_hex_code": "14aaf5", "color_name": "sky_blue"},
+    49: {"color_hex_code": "ccac93", "color_name": "taupe"}
 }
 
 def make_todoist_api(config_file='config.json'):
@@ -76,14 +81,18 @@ class TodoistAPI():
             api_key (str): The API key used to interact with the Todoist API.  
                 See:  https://developer.todoist.com/rest/v1/?shell#authorization
         """
-        
-        
+
+
         # Pin the api key that we just read out of bitwarden to self
         self.api_key = api_key
         self.auth_header = {"Authorization": f"Bearer {self.api_key}"}
 
         # Handle the base URL
-        self.base_url = "https://api.todoist.com/rest/v1/" # method endpoints get concatendated onto this
+        self.base_url_rest_api = "https://api.todoist.com/rest/v1/" # method endpoints get concatenated onto this
+
+        # Handle the sync API base URL. The Sync API is different from the REST API, which this module generally favors
+        # Some methods (like update_task) need to make use of the Sync API, in addition to the REST API
+        self.base_url_sync_api = "https://api.todoist.com/sync/v8/sync/"
 
     def _do_get(self, url:str, headers:dict={}, params:dict={}, expected_status_code=200):
         """
@@ -93,8 +102,9 @@ class TodoistAPI():
 
         Args:
             url ([string]): The URL to do the GET request on
-            headers (dict, optional): Any headers that need to be passed along.  We'll update() in auth as needed. Defaults to {}.
-            parameters (dict, optional):  A dictionary of URL parameters to be passed along
+            headers (dict, optional): Any headers that need to be passed along.  We'll update() in auth as needed.
+            Defaults to {}.
+            params (dict, optional):  A dictionary of URL parameters to be passed along
             expected_status_code (int or list of int, optional): An integer or list of integers corresponding with the http request code that we would expect to get back
                 200 is the default which means ok
                 204, might also be acceptable when updating a task, for example
@@ -102,8 +112,9 @@ class TodoistAPI():
                 See:  https://developer.todoist.com/rest/v1/#overview
         """
 
-        result = self._do_request(http_method='GET', url=url, headers=headers, get_request_url_parameters=params, expected_status_code=expected_status_code)
-        
+        result = self._do_request(http_method='GET', url=url, headers=headers, get_request_url_parameters=params,
+                                  expected_status_code=expected_status_code)
+
         return result
 
     def _do_post(self, url:str, headers:dict={}, data:dict={}, expected_status_code=200):
@@ -127,9 +138,11 @@ class TodoistAPI():
             headers['Content-Type'] = 'application/json'
 
         if 'X-Request-Id' not in headers.keys():
-            headers['X-Request-Id'] = str(uuid.uuid1()).upper() # Todoist like a UUID to be passed in POSTS to avoid re-processing the same thing over and over
-        
-        result = self._do_request(http_method='POST', url=url, headers=headers, post_request_data=data, expected_status_code=expected_status_code)
+            #TODO:  Drop this line.  # headers['X-Request-Id'] = str(uuid.uuid1()).upper() # Todoist like a UUID to be passed in POSTS to avoid re-processing the same thing over and over
+            headers['X-Request-Id'] = self.make_uuid() # Todoist like a UUID to be passed in POSTS to avoid re-processing the same thing over and over
+
+        result = self._do_request(http_method='POST', url=url, headers=headers, post_request_data=data,
+                                  expected_status_code=expected_status_code)
 
         return result
 
@@ -146,7 +159,8 @@ class TodoistAPI():
         result = self._do_request(http_method='DELETE', url=url, expected_status_code=expected_status_code)
         return result
 
-    def _do_request(self, http_method:str, url:str, headers:dict={}, post_request_data:dict={}, get_request_url_parameters:dict={}, expected_status_code=200):
+    def _do_request(self, http_method:str, url:str, headers:dict={}, post_request_data:dict={},
+                    get_request_url_parameters:dict={}, expected_status_code=200):
         """
         Does a request to the API with the corresponding 'verb' passed in the request_type argument
 
@@ -168,7 +182,7 @@ class TodoistAPI():
         http_method = http_method.upper()
         supported_http_methods = ['GET', 'POST', 'DELETE']
         if http_method.upper() not in supported_http_methods:
-            raise ValueError(f"{http_method} is not supported by this method.  Supported request types are: {supported_http_methods}")  
+            raise ValueError(f"{http_method} is not supported by this method.  Supported request types are: {supported_http_methods}")
 
         #TODO:  If method is post validate that there is a payload here
 
@@ -215,10 +229,10 @@ class TodoistAPI():
         """
 
         method = "projects"
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
 
         result = self._do_get(url=endpoint_url)
-        
+
         projects = result.json()
 
         return projects
@@ -247,7 +261,7 @@ class TodoistAPI():
                 raise IndexError(f"There is already a project named {p['name']}")
 
         # Validate the parent project id.  We need an int
-        
+
         if parent_project_id is not None and type(parent_project_id) is not int:
             raise TypeError(f"The parent project id, if passed, should be an int.  Got {type(parent_project_id)}")
 
@@ -284,7 +298,7 @@ class TodoistAPI():
 
         # Construct the payload to pass to the api
         data = dict(name=new_project_name)
-        
+
         if parent_project_id is not None:
             data['parent_id'] = parent_project_id
 
@@ -296,7 +310,7 @@ class TodoistAPI():
 
         # Validations have passed at this point.  Attempt to create the new project and leave the rest up to fate.
         method = "projects"
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
         result = self._do_post(url=endpoint_url, data=data, expected_status_code=200)
 
         return result.json()
@@ -314,7 +328,7 @@ class TodoistAPI():
             raise TypeError(f"The project_id must be an integer.  Got {type(project_id)}")
 
         method='projects'
-        endpoint_url = f"{self.base_url}{method}/{project_id}"
+        endpoint_url = f"{self.base_url_rest_api}{method}/{project_id}"
         result = self._do_get(url=endpoint_url)
         return result.json()
 
@@ -341,7 +355,7 @@ class TodoistAPI():
             response = getattr(ex, 'response', None)
             if response is None:
                 raise ex
-            
+
             status_code = getattr(response, 'status_code', None)
             if status_code is None:
                 raise ex
@@ -351,7 +365,7 @@ class TodoistAPI():
             else:
                 # We got some unexpected status code.  Let's raise the exception
                 raise ex
-        
+
         return True
 
     def update_project(self, project_id:int, project_name:str=None, color=None, is_favorite=None):
@@ -406,7 +420,7 @@ class TodoistAPI():
             project_name_matches = True if current_project_name == project_name else False
         else:
             project_name_matches = True
-        
+
         if color is not None:
             color_matches = True if current_color == color else False
         else:
@@ -432,10 +446,10 @@ class TodoistAPI():
             data['favorite'] = is_favorite
 
         method='projects'
-        endpoint_url = f"{self.base_url}{method}/{project_id}"
-        
+        endpoint_url = f"{self.base_url_rest_api}{method}/{project_id}"
+
         result = self._do_post(url=endpoint_url, data=data, expected_status_code=204)
-        
+
         return result
 
     def delete_project(self, project_id:int):
@@ -448,9 +462,9 @@ class TodoistAPI():
 
         if not self.project_exists(project_id=project_id):
             raise ValueError(f"The project id {project_id} does not exist.  There is nothing to delete")
-        
+
         method='projects'
-        endpoint_url = f"{self.base_url}{method}/{project_id}"
+        endpoint_url = f"{self.base_url_rest_api}{method}/{project_id}"
         result = self._do_delete(url=endpoint_url)
         return result
 
@@ -474,7 +488,7 @@ class TodoistAPI():
         """
 
         method='sections'
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
 
         # Validate project_id
         params = {}
@@ -525,7 +539,7 @@ class TodoistAPI():
 
         # Create the new section
         method="sections"
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
         data=dict(project_id=project_id,name=section_name)
 
         result = self._do_post(url=endpoint_url, data=data)
@@ -545,7 +559,7 @@ class TodoistAPI():
         #TODO:  Implement this.  See:  https://developer.todoist.com/rest/v1/?shell#delete-a-section
         raise NotImplementedError
 
-    
+
 
 
 
@@ -619,7 +633,7 @@ class TodoistAPI():
 
         # Prepare the request
         method = "tasks"
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
 
         # Submit the request
         result = self._do_get(url=endpoint_url, params=params)
@@ -652,17 +666,16 @@ class TodoistAPI():
             raise ValueError(f"task_id argument should be an integer.  Got {type(task_id)}")
 
         method = "tasks"
-        endpoint_url = f"{self.base_url}{method}/{task_id}"  # Here, we simply suffix the task ID in question
+        endpoint_url = f"{self.base_url_rest_api}{method}/{task_id}"  # Here, we simply suffix the task ID in question
 
         result = self._do_get(url=endpoint_url)
         task = result.json()
 
         return task
 
-    def create_new_task(self, task_name:str, description:str = None, project_id:int = None, section_id:int = None,
-                        parent_id:int = None, order:int = None, label_ids:list = None, priority:int = 1,
-                        due_string:str = None, due_date:str = None, due_datetime:str = None, due_lang:str = "EN",
-                        assignee:int = None):
+    def create_new_task(self, task_name:str, description:str = None, project_id:int = None, section_id:int=None,
+                        parent_id:int=None, order:int=None, label_ids:list=None, priority:int=1,due_string:str=None,
+                        due_date:str=None, due_datetime:str=None, due_lang:str = "EN",assignee:int=None):
 
         """
 
@@ -680,15 +693,17 @@ class TodoistAPI():
             due_date: Specific date in YYYY-MM-DD format relative to user’s timezone.
             due_datetime: 	Specific date and time in RFC3339 format in UTC.
             due_lang: 2-letter code specifying language in case due_string is not written in English.
-            assignee:
+            assignee:  The user ID to assign to for shared tasks
 
         Returns:
 
         """
 
-        # Handle task name
-        if not task_name or type(task_name) is not str:
-            raise ValueError(f"The task name must be a non empty string.")
+        # Handle the task name validation
+        try:
+            self.validate_task_name(task_name=task_name)
+        except ValueError as ex:
+            raise ex
 
         # Handle task description (additional descriptive text)
         if description is not None:
@@ -752,7 +767,9 @@ class TodoistAPI():
                 raise ValueError(f"The order argument, if specified should be a non-zero positive integer")
 
         # Validate labels:
-            #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method
+        if label_ids is not None:
+            raise NotImplementedError(f"Validation of labels has not yet been implemented in the Create new task method.")
+            #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method.  Note:  The update method will need similar
 
         # Validate priority:
         if priority is not None:
@@ -806,9 +823,335 @@ class TodoistAPI():
 
         # Do the post
         method = "tasks"
-        endpoint_url = f"{self.base_url}{method}"
+        endpoint_url = f"{self.base_url_rest_api}{method}"
         result = self._do_post(url=endpoint_url, data=payload)
         return result.json()
+
+    def update_task(self, task_id:int, task_name:str=None, description:str=None, project_id:int=None, section_id:int=None,
+                    parent_id=None, order:int=None, label_ids:list=None, priority:int=1, due_string:str=None,
+                    due_date:str=None, due_datetime:str=None, due_lang:str="EN", assignee:int=None):
+        """
+        Updates a task.  Note that this is very similar to the creation of a task, but due to some gaps in the REST
+        API, will make some special calls to the Sync APU to set some fields.  That's ok though as this whole class
+        is about abstraction
+        Args:
+            task_id:  The idea of the task we wish to update.
+            task_name:  The name of the task to update to.
+            description: The updated description of the task.
+            project_id:  The ID of the parent project to update to.  Gets set via the Sync API.
+            section_id:  The ID of the section to update to.  Gets set via the Sync API.
+            parent_id:  The ID of the parent task to update to.  Gets set via the Sync API.
+            order:  The order (beneath the parent project) to update to.  Gets set via the Sync API.
+            label_ids: A list of Label ID's to set on the task.
+            priority:  The task priority from 1 (normal) to 4 (urgent)
+            due_string:  Human defined task due date (ex.: "next Monday", "Tomorrow").
+                Value is set using local (not UTC) time
+            due_date:   Specific date in YYYY-MM-DD format relative to user’s timezone.
+            due_datetime:  Specific date and time in RFC3339 format in UTC.
+            due_lang:  2-letter code specifying language in case due_string is not written in English.
+            assignee:  The user ID to assign to (or 0 to unset) for shared tasks
+
+        Returns:
+
+        """
+
+        # Handle the task ID
+        if not self.validate_task_exists(task_id=task_id):
+            raise KeyError(f"The task ID {task_id} does not exist.  Cannot Update.")
+
+        # Handle task name
+        if task_name is not None:
+            self.validate_task_name(task_name=task_name)  # Throws ValueError exception if invalid
+
+        # Handle task description
+        if description is not None:
+            description = str(description)
+
+        # Validate the Project ID, if one was specified
+        if project_id is not None:
+            if not self.project_exists(project_id=project_id):
+                raise ValueError(f"There is no project with the ID, {project_id}.  It doesn't exist.")
+
+        # Validate Section ID if one was specified
+        if section_id is not None:
+            # We must have a project to specify a section with in if the section is specified
+            if project_id is None:
+                raise ValueError(f"You cannot specify a section ID without also specifying the project ID")
+
+            project_sections = self.get_sections_by_project_id(project_id=project_id)
+            if section_id not in [p['id'] for p in project_sections]:
+                raise ValueError(f"There is no section with the ID {section_id} beneath the project with the ID {project_id}")
+
+        # Validate parent id, if one was specified.
+        if parent_id is not None:
+
+            #Validate the type of parent_id
+            if type(parent_id) is not int:
+                raise TypeError(f"The type of the parent_id argument, if passed must be int.  Got value {parent_id}, which is of type {type(parent_id)}")
+
+            # Validate that the parent ID is not the same as the task ID (Can't have a child be its own parent)
+            if task_id == parent_id:
+                raise ValueError(f"Both the task_id and parent_id arguments were passed in with the same value ({task_id}).  "
+                                 f"Cannot set a child to be its own parent")
+
+            # Validate that the parent ID is a valid task ID
+            if self.validate_task_exists(task_id=parent_id) is False:
+                raise ValueError(f"The parent_id {parent_id} is not a valid task ID.")
+
+
+        # Validate the order
+        # TODO:  Implement this.  It needs to be called via the re-order items endpoint:  https://developer.todoist.com/sync/v8/#reorder-items
+        if order is not None:
+            raise NotImplementedError(f"Handling to update the order has not yet been implemented.  "
+                                      f"Maybe you should do it?")
+
+        # Validate the labels
+        if label_ids is not None:
+            if type(label_ids) is not list:
+                raise TypeError(f"The label_ids argument, if passed must be a list containing one or more integers.  "
+                                f"Got type {type(label_ids)}")
+            else:
+                for l in label_ids:
+                    if type(l) is not int:
+                        raise TypeError(f"All label ids passed in the label_ids argument should be of type int.  "
+                                        f"Got value {l} which is of type {type(type(l))}")
+
+
+            #TODO:  Need to implement a method to get all labels then bump that up against the labels passed into this method.  Note:  The create method will need similar
+            # raise  NotImplementedError(f"Handling to update the labels hasn't been implemented.  You should implement it.  Note:  The create new task method will need the same.")
+
+        #Validate the priority:
+        if priority is not None:
+            permissible_priorities = [1,2,3,4]
+            if priority not in permissible_priorities:  # 1 = Normal Priority .. 4 = Urgent Priority
+                raise ValueError(f"Priority, if specified, must be one of: {permissible_priorities}")
+
+        # Validate the due_* arguments.  These are mutually exclusive
+        due_values = [due_string, due_date, due_datetime]
+        if any(due_values):
+            i = 0
+            for dv in due_values:
+                if dv is not None:
+                    if type(dv) is not str:
+                        raise ValueError(f"All due_* arguments, if passed, should be a string.  Only one should dbe passed at a time")
+                    i +=1
+            if i>1:
+                raise ValueError(f"Only one of {due_values} may be passed at once.  Got {i}")
+
+        # Default the due string to tomorrow, if not otherwise specified
+        if not due_date and not due_datetime:
+            if due_string is None:
+                due_string = "Tomorrow"
+
+        # Validate language
+        # TODO:  Implement this
+        if due_lang != "EN":
+            raise NotImplementedError(f"There is no validation handling for due language.  Please have it built")
+
+        # Validate Assignee
+        if assignee:
+            if type(assignee) is not int:
+                raise ValueError(f"Assignee argument, if specified should be a positive integer")
+            else:
+                raise NotImplementedError(f"There is no validation handling for assignee.  Please have it built")
+                #TODO:  Implement this at some point
+
+
+        # TODO:  Append the due_* variable into the payload.  There should onlybe one of the three.  Or none.
+        # Validate the due_* parameters.  These are mutually exclusive and we must get exactly 0 or one of them
+        date_args_count = 0
+        if due_string:
+            date_args_count += 1
+        if due_date:
+            date_args_count += 1
+        if due_datetime:
+            date_args_count += 1
+
+        if date_args_count >= 2:
+            raise ValueError(f"The arguments due_string, due_date, due_datetime are mutually exclusive.  "
+                             f"If any of these are passed, only one of them should be passed.  "
+                             f"Got {date_args_count} truthy values")
+
+        # Construct a payload for the REST API (Not to be confused with the Sync API)
+        rest_api_params = [task_name, description, label_ids, priority, due_string, due_date, due_datetime, due_lang, assignee]
+        if any(rest_api_params):
+            rest_api_payload = {}
+
+            if task_name is not None:
+                rest_api_payload['content'] = task_name
+
+            if description is not None:
+                rest_api_payload['description'] = description
+
+            if label_ids is not None:
+                # TODO:  Does there need to be handling here to append any existing label_ids into the payload?
+                #  Confirmed today (2022-06-04) that setting label_ids is a set operation, not append
+                #  Also, that sending an invalid label id (int) doesn't seem to cause problems,
+                #  the others are still pinned to the task
+                rest_api_payload['label_ids'] = label_ids
+
+            if priority is not None:
+                rest_api_payload['priority'] = priority
+
+            if due_string is not None:
+                rest_api_payload['due_string'] = due_string
+
+            if due_date is not None:
+                rest_api_payload['due_date'] = due_date
+
+            if due_datetime is not None:
+                rest_api_payload['due_datetime'] = due_datetime
+
+            if due_lang is not None:
+                rest_api_payload['due_lang'] = due_lang
+
+            if assignee is not None:
+                rest_api_payload['assignee'] = assignee
+
+            method = "tasks"
+            rest_api_endpoint_url = f"{self.base_url_rest_api}{method}/{task_id}"
+            rest_api_post_result = self._do_post(url=rest_api_endpoint_url, data=rest_api_payload)
+            request_status_code = rest_api_post_result.status_code
+            if request_status_code != 204:
+                rest_api_post_result.raise_for_status()
+
+        # Construct a payload for the Sync API (Not to be confused with REST API, as in the block above)
+        #
+        #   BUGS IN THIS BLOCK !!!
+        #
+
+        #TODO:  2022-06-04- Pick back up here next time.  Something is wrong with the way we're constructing commands
+        #  I think it needs to be passed in as a string?.  See:  https://developer.todoist.com/sync/v8/#move-an-item
+        sync_api_params = [project_id, section_id, parent_id, order]
+        if any(sync_api_params):
+
+            move_item_payload = {}
+
+            # project_id, section_id, and parent_id, are all handled by the 'Move an item' method
+            #  https://developer.todoist.com/sync/v8/#move-an-item
+            #  Note:  The sync API refers to tasks as 'items'
+
+            if project_id is not None:
+                move_item_payload['project_id'] = project_id
+
+            if section_id is not None:
+                move_item_payload['section_id'] = section_id
+
+            if parent_id is not None:
+                move_item_payload['parent_id'] = parent_id
+
+            if len(move_item_payload) >0:
+                _uuid = self.make_uuid() #Don't shadow library name
+                command_args = dict(id=task_id).update(move_item_payload)
+                command = dict(type="item_move", uuid=_uuid, args=command_args)
+                commands = str([json.dumps(command)]) # Documentation has these wrapped up in a list, passed as a string
+                sync_api_payload = dict(commands=commands)
+
+                print(json.dumps(sync_api_payload)) #TODO:  Drop this debug line
+
+                sync_api_endpoint_url = self.base_url_sync_api
+                sync_api_post = self._do_post(url=sync_api_endpoint_url, data=sync_api_payload)
+
+                #Sync API can return a 200 even if something went wrong
+                sync_api_post_result = sync_api_post.json()
+
+                print("!")
+
+
+            # Todo.  Handle the order argument here, which uses the sync API, but uses the 'Reorder items' method rather than Move an item
+            #  See:  https://developer.todoist.com/sync/v8/#reorder-items
+
+
+
+
+    # TODO:  Detect params that require a call to the Sync API and handle that all here
+    # TODO:  Pick back up here next time
+
+
+
+
+
+
+
+    @staticmethod
+    def validate_task_name(task_name):
+        if not task_name or type(task_name) is not str:
+            raise ValueError(f"The task name, if passed must be a non-empty string.")
+
+        return True
+
+    @staticmethod
+    def make_uuid():
+        """
+        Makes a UUID string and returns the value.
+        The Sync API (not the REST API) requires that a UUID be sent along with requests
+        Args:
+            self:
+
+        Returns:
+
+        """
+
+        return str(uuid.uuid1()).upper()
+
+    def validate_task_exists(self, task_id):
+        """
+        Validates that a given task ID exists.  Returns True if it exists, else False
+        Args:
+            task_id:
+        Returns:
+        """
+
+        if not type(task_id) is int:
+            raise ValueError(f"task_id argument should be an integer.  Got {task_id}, which is of type {type(task_id)}")
+
+        all_tasks = self.get_all_tasks()
+
+        ret_val = False
+
+        for t in all_tasks:
+            if t['id'] == task_id:
+                ret_val = True
+                break
+
+        return ret_val
+
+
+
+        print("!")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def _move_an_item(self):
+        """
+        A special wrapper around the "Move an item" method from the Sync API (not the Rest API)
+        (https://developer.todoist.com/sync/v8/#move-an-item)
+
+        The update_task method of this class will need to make a call to this special function if updating a task's project
+        the reason for this is that the "Update a task" method, which is part of the Rest API, lacks a parameter to update
+        a task's parent project.  I did some googling and came across the reddit page at the link below, which pointed out
+        that this can be accomplished with the Sync API.  Of course, the purpose of this entire class is to
+        abstract these sorts of things away
+
+        Returns:
+
+        """
+
+
+        #TODO:  Implement this method
+        raise NotImplementedError
 
 
     
@@ -817,17 +1160,22 @@ if __name__ == '__main__':
 
     # Instantiate object
     td = make_todoist_api()
+    td.validate_task_exists(task_id=1)
+
+    print(type(td))
+
+
     # active_tasks = td.get_active_tasks()
 
     #  Get all the projects
-    projects=td.get_all_projects()
+    # projects=td.get_all_projects()
 
     # Create temp project
-    new_project = td.create_new_project(new_project_name="Development Project", color="taupe", is_favorite=True)
-    test_project_id = new_project['id']
+    # new_project = td.create_new_project(new_project_name="Development Project", color="taupe", is_favorite=True)
+    # test_project_id = new_project['id']
 
     # Create a temp section within the temp project
-    new_section = td.create_new_section(section_name='Development Test Section', project_id=test_project_id)
+    # new_section = td.create_new_section(section_name='Development Test Section', project_id=test_project_id)
 
     # Get all the sections for a given project
     # project_sections = td.get_all_sections(project_id=2283847451)
@@ -842,14 +1190,35 @@ if __name__ == '__main__':
     # td.update_project(project_id=p_id, color='b8256f')
     # td.delete_project(project_id=p_id)
 
-    # Create a new test task
-    td.create_new_task(task_name='test task', project_id=test_project_id)
+    # Create a new test task, then update date it
+    # import random
+    # import string
+    # random_junk = "".join(random.choice(string.ascii_lowercase) for i in range(3))
+    # new_task = td.create_new_task(task_name=f'test task {random_junk}')
+    # new_task_id = new_task['id']
+    # new_task_name = new_task['content']
+    # print(f"Created task with id {new_task_id}.  It's name is {new_task_name}")
+    # random_junk_2 = "".join(random.choice(string.ascii_lowercase) for i in range(3))
+    # updated_task_name=f"{new_task_name} --> test task {random_junk_2}"
+    # td.update_task(task_id=new_task_id, task_name=updated_task_name)
+    # updated_task = td.get_task_by_id(task_id=new_task_id)
+    # new_task_name = updated_task['content']
+    # print(f"The task name was updated to {new_task_name}")
+    #
+    #
+
+    all_tasks = td.get_all_tasks()
+    print(json.dumps(all_tasks, indent=4))
+    t = td.get_task_by_id(task_id=5902862887)
+    td.update_task(task_id=5902867063, parent_id=5902862887)
+    # print(json.dumps(t, indent=2))
+
 
     # Clean up the temp project
-    td.delete_project(project_id=test_project_id)
+    # td.delete_project(project_id=test_project_id)
+    # td.update_task(task_id=5902862887)
 
 
 
     print("Done")
-    
-    
+
